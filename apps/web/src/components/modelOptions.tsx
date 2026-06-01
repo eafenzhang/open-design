@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes } from 'react';
+import { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState, type ButtonHTMLAttributes, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { AgentModelOption } from '../types';
 
 export function renderModelOptions(models: AgentModelOption[]) {
@@ -141,6 +141,13 @@ export const SearchableModelSelect = forwardRef<
     };
   }, [open]);
 
+  const handlePopoverKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    setOpen(false);
+    buttonRef.current?.focus();
+  };
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -227,6 +234,7 @@ export const SearchableModelSelect = forwardRef<
               data-testid={popoverTestId}
               onMouseDown={(event) => event.stopPropagation()}
               onClick={(event) => event.stopPropagation()}
+              onKeyDown={handlePopoverKeyDown}
               style={{
                 position: 'fixed',
                 top: popoverStyle.top != null ? `${popoverStyle.top}px` : 'auto',

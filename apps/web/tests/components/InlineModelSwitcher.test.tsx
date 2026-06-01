@@ -767,4 +767,54 @@ describe('InlineModelSwitcher AMR row', () => {
       expect(onAgentChange).toHaveBeenCalledWith('amr');
     });
   });
+  it('closes only the nested Home BYOK model popover on Escape and keeps the switcher open', async () => {
+    render(
+      <InlineModelSwitcher
+        config={{
+          ...baseConfig,
+          mode: 'api',
+          apiProtocol: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          apiProviderBaseUrl: 'https://api.openai.com/v1',
+          apiKey: 'sk-test',
+          model: 'gpt-4.1-mini',
+        }}
+        agents={[amrAgent, codexAgent]}
+        daemonLive={true}
+        onModeChange={vi.fn()}
+        onAgentChange={vi.fn()}
+        onAgentModelChange={vi.fn()}
+        onApiProtocolChange={vi.fn()}
+        onApiModelChange={vi.fn()}
+        providerModelsCache={{
+          ['openai\nhttps://api.openai.com/v1\nsk-test\n']: [
+            { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini' },
+            { id: 'gpt-5.5', label: 'gpt-5.5' },
+            { id: 'gpt-image-2', label: 'gpt-image-2' },
+            { id: 'o4-mini', label: 'o4-mini' },
+            { id: 'o3', label: 'o3' },
+            { id: 'gpt-4o', label: 'gpt-4o' },
+            { id: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+            { id: 'deepseek-v4-flash', label: 'deepseek-v4-flash' },
+          ],
+        }}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('inline-model-switcher-chip'));
+    const switcherPopover = await screen.findByTestId('inline-model-switcher-popover');
+    const modelPicker = within(switcherPopover).getByTestId('inline-model-switcher-api-model');
+    fireEvent.click(modelPicker);
+
+    const modelPopover = await screen.findByTestId('inline-model-switcher-api-model-popover');
+    const search = within(modelPopover).getByTestId('inline-model-switcher-api-model-search');
+    fireEvent.keyDown(search, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('inline-model-switcher-api-model-popover')).toBeNull();
+    });
+    expect(screen.getByTestId('inline-model-switcher-popover')).toBeTruthy();
+  });
+
 });

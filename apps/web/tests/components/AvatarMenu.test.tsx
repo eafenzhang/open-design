@@ -253,4 +253,37 @@ describe('AvatarMenu', () => {
 
     expect(onAgentModelChange).toHaveBeenCalledWith('codex', { model: 'deepseek-v4-flash' });
   });
+  it('closes only the nested Local CLI model popover on Escape and keeps the avatar menu open', async () => {
+    render(
+      <I18nProvider>
+        <AvatarMenu
+          config={daemonConfig}
+          agents={agents}
+          daemonLive
+          onModeChange={vi.fn()}
+          onAgentChange={vi.fn()}
+          onAgentModelChange={vi.fn()}
+          onApiModelChange={vi.fn()}
+          onOpenSettings={vi.fn()}
+          providerModelsCache={{}}
+          onRefreshAgents={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Account & settings' }));
+    const menu = await screen.findByRole('dialog', { name: 'Account & settings' });
+    const modelCombobox = within(menu).getByRole('combobox', { name: 'Model' });
+    fireEvent.click(modelCombobox);
+
+    const modelPopover = await screen.findByTestId('avatar-model-popover');
+    const search = within(modelPopover).getByTestId('avatar-model-search');
+    fireEvent.keyDown(search, { key: 'Escape' });
+
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId('avatar-model-popover')).toBeNull();
+    });
+    expect(screen.getByRole('dialog', { name: 'Account & settings' })).toBeTruthy();
+  });
+
 });
