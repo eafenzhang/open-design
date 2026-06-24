@@ -1,0 +1,191 @@
+name: E2E Tests — Windows
+
+on:
+  push:
+    branches: [main, release/*]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "9"
+
+jobs:
+  e2e-windows:
+    name: E2E Tests (Windows)
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Electron app
+        run: pnpm run build:desktop
+        env:
+          NODE_ENV: development
+
+      - name: Start application for E2E
+        shell: pwsh
+        run: |
+          Write-Host "[OpenDesign:E2E] Starting application..."
+          $process = Start-Process -FilePath "pnpm" -ArgumentList "run dev:desktop" -PassThru -NoNewWindow
+
+          # Wait for application to start (increased from 30s to 60s)
+          Write-Host "[OpenDesign:E2E] Waiting for startup (max 60s)..."
+          $timeout = 60
+          $elapsed = 0
+          $started = $false
+
+          while ($elapsed -lt $timeout) {
+            Start-Sleep -Seconds 2
+            $elapsed += 2
+
+            # Check if daemon process is alive
+            $daemon = Get-Process -Name "open-design-daemon" -ErrorAction SilentlyContinue
+            if ($daemon) {
+              Write-Host "[OpenDesign:E2E] Daemon detected (PID: $($daemon.Id))"
+            }
+
+            # Health check endpoint
+            try {
+              $response = Invoke-WebRequest -Uri "http://127.0.0.1:18924/health" -TimeoutSec 2 -ErrorAction Stop
+              if ($response.StatusCode -eq 200) {
+                Write-Host "[OpenDesign:E2E] Health check passed after ${elapsed}s"
+                $started = $true
+                break
+              }
+            } catch {
+              # Continue waiting
+            }
+          }
+
+          if (-not $started) {
+            Write-Host "[OpenDesign:E2E] WARNING: App did not start within ${timeout}s"
+          }
+
+          # Export process info for later steps
+          echo "APP_STARTED=$started" >> $env:GITHUB_ENV
+          echo "APP_PID=$($process.Id)" >> $env:GITHUB_ENV
+
+      - name: Run E2E tests
+        id: e2e-tests
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Write-Host "[OpenDesign:E2E] Running E2E tests..."
+
+          # Retry logic: up to 2 attempts
+          $maxAttempts = 2
+          $attempt = 0
+          $success = $false
+
+          while ($attempt -lt $maxAttempts -and -not $success) {
+            $attempt++
+            Write-Host "[OpenDesign:E2E] Attempt $attempt / $maxAttempts"
+
+            pnpm run test:e2e 2>&1 | Tee-Object -FilePath e2e-output.log
+
+            if ($LASTEXITCODE -eq 0) {
+              $success = $true
+              Write-Host "[OpenDesign:E2E] Tests PASSED on attempt $attempt"
+            } else {
+              Write-Host "[OpenDesign:E2E] Tests FAILED on attempt $attempt"
+              if ($attempt -lt $maxAttempts) {
+                Write-Host "[OpenDesign:E2E] Retrying in 10s..."
+                Start-Sleep -Seconds 10
+              }
+            }
+          }
+
+          if (-not $success) {
+            Write-Host "[OpenDesign:E2E] Tests FAILED after $maxAttempts attempts"
+            echo "E2E_RESULT=failure" >> $env:GITHUB_ENV
+          } else {
+            echo "E2E_RESULT=success" >> $env:GITHUB_ENV
+          }
+
+      - name: Collect GPU diagnostic logs
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "[OpenDesign:E2E] Collecting GPU logs..."
+
+          # Collect application GPU state logs
+          $logDir = "$env:APPDATA\open-design\logs"
+          if (Test-Path $logDir) {
+            Get-ChildItem $logDir -Filter "*.log" | ForEach-Object {
+              Write-Host "--- GPU Log: $($_.Name) ---"
+              Get-Content $_.FullName -Tail 50
+            }
+          }
+
+          # Collect system GPU info
+          Write-Host "--- System GPU Info ---"
+          Get-CimInstance Win32_VideoController | Format-List Name, DriverVersion, AdapterRAM
+
+      - name: Upload E2E test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-windows-logs
+          path: |
+            e2e-output.log
+          retention-days: 7
+
+      - name: Upload GPU diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-windows-gpu-logs
+          path: |
+            ${{ env.APPDATA }}/open-design/logs/*.log
+          retention-days: 7
+
+      - name: Stop application
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "[OpenDesign:E2E] Stopping application..."
+
+          # Stop daemon
+          $daemon = Get-Process -Name "open-design-daemon" -ErrorAction SilentlyContinue
+          if ($daemon) {
+            Stop-Process -Id $daemon.Id -Force
+            Write-Host "[OpenDesign:E2E] Daemon stopped."
+          }
+
+          # Stop Electron
+          $electron = Get-Process -Name "open-design" -ErrorAction SilentlyContinue
+          if ($electron) {
+            Stop-Process -Id $electron.Id -Force
+            Write-Host "[OpenDesign:E2E] Electron stopped."
+          }
+
+      - name: Report result
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:E2E_RESULT -eq "success") {
+            Write-Host "[OpenDesign:E2E] ✅ All E2E tests passed!"
+          } else {
+            Write-Host "[OpenDesign:E2E] ❌ E2E tests failed. Check artifacts for details."
+            exit 1
+          }

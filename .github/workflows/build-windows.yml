@@ -1,0 +1,135 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main, release/*]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "24"
+  PNPM_VERSION: "9"
+
+jobs:
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-2022
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm run lint
+        continue-on-error: false
+
+      - name: Type check
+        run: pnpm run typecheck
+        continue-on-error: false
+
+      - name: Run unit tests
+        run: pnpm run test -- --reporter=verbose
+
+      - name: Build Electron app
+        run: pnpm run build:desktop
+        env:
+          NODE_ENV: production
+
+      - name: Package Windows installer (NSIS)
+        run: pnpm run package:windows
+        env:
+          NODE_ENV: production
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # === Code Signing Step ===
+      # Requires CODESIGN_CERTIFICATE_BASE64 and CODESIGN_CERT_PASSWORD GitHub Secrets
+      - name: Prepare code signing certificate
+        if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          if (-not $env:CODESIGN_CERTIFICATE_BASE64) {
+            Write-Host "[OpenDesign:CI] No code signing certificate secret found. Skipping signing."
+            echo "CODESIGN_ENABLED=false" >> $env:GITHUB_ENV
+          } else {
+            $certBytes = [System.Convert]::FromBase64String($env:CODESIGN_CERTIFICATE_BASE64)
+            $certPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+            [System.IO.File]::WriteAllBytes($certPath, $certBytes)
+            echo "CODESIGN_CERT_PATH=$certPath" >> $env:GITHUB_ENV
+            echo "CODESIGN_ENABLED=true" >> $env:GITHUB_ENV
+            Write-Host "[OpenDesign:CI] Code signing certificate prepared at $certPath"
+          }
+        env:
+          CODESIGN_CERTIFICATE_BASE64: ${{ secrets.CODESIGN_CERTIFICATE_BASE64 }}
+
+      - name: Sign Windows installer
+        if: env.CODESIGN_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          $installerPath = Get-ChildItem -Path "apps/desktop/dist" -Filter "*.exe" -Recurse |
+            Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*Installer*" } |
+            Select-Object -First 1 -ExpandProperty FullName
+
+          if (-not $installerPath) {
+            Write-Host "[OpenDesign:CI] No installer found to sign."
+            exit 0
+          }
+
+          Write-Host "[OpenDesign:CI] Signing: $installerPath"
+          & "${{ github.workspace }}/scripts/windows-code-sign.ps1" `
+            -TargetPath $installerPath `
+            -CertificateFile $env:CODESIGN_CERT_PATH `
+            -CertificatePassword $env:CODESIGN_CERT_PASSWORD
+        env:
+          CODESIGN_CERT_PATH: ${{ env.CODESIGN_CERT_PATH }}
+          CODESIGN_CERT_PASSWORD: ${{ secrets.CODESIGN_CERT_PASSWORD }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest*.yml
+          retention-days: 30
+
+      - name: Upload GPU diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-gpu-logs
+          path: |
+            ${{ runner.temp }}/open-design-gpu-*.log
+          retention-days: 7

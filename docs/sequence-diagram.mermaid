@@ -1,0 +1,145 @@
+sequenceDiagram
+    participant Main as Main Process (index.ts)
+    participant PM as PerformanceMonitor
+    participant HRT as process.hrtime()
+    participant R as Renderer (FpsMeter)
+    participant IPC as IPC Bridge
+
+    Main->>PM: new PerformanceMonitor(config)
+    Main->>PM: start()
+    activate PM
+    
+    loop Every sampleIntervalMs (main process)
+        PM->>HRT: hrtime() sample
+        HRT-->>PM: delta ns
+        PM->>PM: lagMs = delta - sampleIntervalMs
+        alt lagMs > lagThresholdMs
+            PM->>PM: log warning + store snapshot
+        end
+    end
+
+    loop Every animation frame (renderer)
+        R->>R: requestAnimationFrame(tick)
+        R->>R: calculate FPS (sliding window)
+        alt fps < lowFpsThreshold for > lowFpsDurationMs
+            R->>IPC: electronAPI.performance.reportLowFps(snapshot)
+            IPC->>PM: perf:low-fps-alert
+            PM->>PM: log warning + trigger diagnostic
+        end
+    end
+
+    R->>IPC: electronAPI.performance.sendFpsSnapshot({fps, frameTimeMs})
+    IPC->>PM: perf:snapshot
+    PM->>PM: update _lastSnapshot
+    deactivate PM
+
+    ---
+    title Window Control Flow
+
+    actor User
+    participant TB as TitleBar (React)
+    participant Preload as preload.ts (contextBridge)
+    participant Renderer as ipcRenderer
+    participant Main2 as ipcMain
+    participant BW as BrowserWindow
+
+    User->>TB: Click minimize button
+    TB->>Preload: electronAPI.windowControl.minimize()
+    Preload->>Renderer: ipcRenderer.invoke('window:minimize')
+    Renderer->>Main2: IPC invoke
+    Main2->>BW: win.minimize()
+    BW-->>Main2: void
+    Main2-->>Renderer: {success: true}
+    Renderer-->>Preload: resolved
+    Preload-->>TB: Promise<void>
+
+    User->>TB: Click maximize button
+    TB->>Preload: electronAPI.windowControl.maximize()
+    Preload->>Renderer: ipcRenderer.invoke('window:maximize')
+    Renderer->>Main2: IPC invoke
+    Main2->>BW: win.isMaximized() ? win.unmaximize() : win.maximize()
+    BW-->>Main2: void
+    Main2-->>Renderer: {success: true, isMaximized: newState}
+    Renderer-->>Preload: resolved
+    Preload-->>TB: Promise<{isMaximized}>
+    TB->>TB: setWindowState(MAXIMIZED) | setWindowState(NORMAL)
+
+    User->>TB: Right-click title bar (non-button area)
+    TB->>Preload: electronAPI.windowControl.showSystemMenu(x, y)
+    Preload->>Renderer: ipcRenderer.invoke('window:system-menu', {x, y})
+    Renderer->>Main2: IPC invoke
+    Main2->>Main2: Menu.buildFromTemplate([...systemMenuTemplate])
+    Main2->>BW: systemMenu.popup({x, y})
+
+    ---
+    title IPC Compression Flow
+
+    participant R2 as Renderer Handler
+    participant RComp as IpcCompression (Renderer)
+    participant IPC2 as IPC Channel
+    participant MComp as IpcCompression (Main)
+    participant M2 as Main Handler
+
+    Note over R2,M2: Large payload send (Render → Main)
+
+    R2->>R2: Prepare payload (e.g. 200KB canvas data)
+    R2->>RComp: shouldCompress(200KB) → true
+    RComp->>RComp: zlib.gzipSync(payload, level=6)
+    RComp->>RComp: compressedSize = 42KB
+    
+    alt compressed > chunkThresholdBytes
+        RComp->>RComp: split into N chunks
+        RComp->>IPC2: ipcRenderer.send('large-data:chunk', {id, index:0, total:N, data})
+        IPC2->>MComp: receive chunk 0/N
+        loop remaining chunks
+            RComp->>IPC2: chunk 1/N ... N-1/N
+            IPC2->>MComp: receive
+        end
+        MComp->>MComp: reassemble + zlib.gunzipSync()
+    else single compressed packet
+        RComp->>IPC2: ipcRenderer.invoke('compressed:channel', gzipData + magic header)
+        IPC2->>MComp: receive
+        MComp->>MComp: detect magic 0x1f8b → zlib.gunzipSync()
+    end
+
+    MComp->>M2: decompressed payload
+    M2->>M2: process request
+    M2-->>MComp: response
+    MComp->>MComp: compress response (if > threshold)
+    MComp-->>IPC2: return
+    IPC2-->>RComp: receive
+    RComp->>RComp: decompress response
+    RComp-->>R2: final result
+
+    ---
+    title SQLite Warmup Async Flow
+
+    participant WL as WindowsLifecycle (DAEMON_READY)
+    participant CSO as ColdStartOptimizer
+    participant SI as setImmediate queue
+    participant SQLite as better-sqlite3
+
+    WL->>CSO: warmupSQLiteAsync(dbPath)
+    CSO->>CSO: log "Warming up SQLite (async)..."
+    
+    CSO->>SQLite: new Database(dbPath)
+    SQLite-->>CSO: db instance
+    
+    CSO->>SQLite: db.pragma('journal_mode = WAL')
+    CSO->>SI: yield via setImmediate
+    
+    CSO->>SQLite: db.pragma('synchronous = NORMAL')
+    CSO->>SI: yield via setImmediate
+    
+    CSO->>SQLite: db.pragma('cache_size = -65536')
+    CSO->>SI: yield via setImmediate
+    
+    CSO->>SQLite: db.pragma('mmap_size = 268435456')
+    CSO->>SI: yield via setImmediate
+    
+    CSO->>SQLite: db.prepare("SELECT name FROM sqlite_master...").all()
+    CSO->>SI: yield via setImmediate
+    
+    CSO->>SQLite: db.close()
+    CSO-->>WL: warmup complete
+    Note over CSO,SI: Each setImmediate yields ~1 event loop tick<br/>Prevents blocking the main thread

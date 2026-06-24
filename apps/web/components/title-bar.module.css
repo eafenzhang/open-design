@@ -1,0 +1,188 @@
+/**
+ * Open Design — Title Bar CSS Module
+ *
+ * Shared styles for all title bar components.
+ * Defines drag/no-drag regions, button states (hover/active),
+ * Dark/Light theme variables, and Win10/Win11 size tokens.
+ *
+ * CSS custom properties are set at :root level and consumed
+ * by individual component classes.
+ */
+
+/* ================================================================
+   Theme & Size Variables
+   ================================================================ */
+
+:root {
+  /* Win11 dimensions (default) */
+  --titlebar-height: 36px;
+  --titlebar-button-width: 48px;
+  --titlebar-button-height: 36px;
+  --titlebar-icon-size: 16px;
+  --titlebar-font-size: 12px;
+
+  /* Dark theme (default) */
+  --titlebar-bg: #1e1e1e;
+  --titlebar-fg: #cccccc;
+  --titlebar-button-hover-bg: rgba(255, 255, 255, 0.08);
+  --titlebar-button-active-bg: rgba(255, 255, 255, 0.12);
+  --titlebar-button-close-hover-bg: #e81123;
+  --titlebar-button-close-hover-fg: #ffffff;
+  --titlebar-button-close-active-bg: #bf0f1b;
+  --titlebar-icon-hover-bg: rgba(255, 255, 255, 0.06);
+}
+
+/* Win10 overrides — smaller title bar */
+:root.titleBar_win10 {
+  --titlebar-height: 32px;
+  --titlebar-button-width: 46px;
+  --titlebar-button-height: 32px;
+}
+
+/* Light theme overrides */
+:root.titleBar_light {
+  --titlebar-bg: #f0f0f0;
+  --titlebar-fg: #1a1a1a;
+  --titlebar-button-hover-bg: rgba(0, 0, 0, 0.06);
+  --titlebar-button-active-bg: rgba(0, 0, 0, 0.10);
+  --titlebar-button-close-hover-bg: #e81123;
+  --titlebar-button-close-hover-fg: #ffffff;
+  --titlebar-button-close-active-bg: #bf0f1b;
+  --titlebar-icon-hover-bg: rgba(0, 0, 0, 0.06);
+}
+
+/* ================================================================
+   Container
+   ================================================================ */
+
+.titleBar_dragRegion {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--titlebar-height);
+  background-color: var(--titlebar-bg);
+  color: var(--titlebar-fg);
+  -webkit-app-region: drag;
+  user-select: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+}
+
+/* ================================================================
+   No-drag region (interactive elements)
+   ================================================================ */
+
+.titleBar_noDrag {
+  -webkit-app-region: no-drag;
+}
+
+/* ================================================================
+   Icon
+   ================================================================ */
+
+.titleBar_icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--titlebar-height);
+  height: var(--titlebar-height);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  border-radius: 2px;
+  transition: background-color 0.1s ease;
+}
+
+.titleBar_icon:hover {
+  background-color: var(--titlebar-icon-hover-bg);
+}
+
+.titleBar_icon svg {
+  width: var(--titlebar-icon-size);
+  height: var(--titlebar-icon-size);
+}
+
+/* ================================================================
+   Title Text
+   ================================================================ */
+
+.titleBar_title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  font-size: var(--titlebar-font-size);
+  line-height: 1;
+  color: var(--titlebar-fg);
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ================================================================
+   Controls Container (min/max/close buttons)
+   ================================================================ */
+
+.titleBar_controls {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin-left: auto;
+}
+
+/* ================================================================
+   Button (minimize / maximize / close)
+   ================================================================ */
+
+.titleBar_button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--titlebar-button-width);
+  height: var(--titlebar-button-height);
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--titlebar-fg);
+  -webkit-app-region: no-drag;
+  transition: background-color 0.1s ease;
+  outline: none;
+}
+
+.titleBar_button:hover {
+  background-color: var(--titlebar-button-hover-bg);
+}
+
+.titleBar_button:active {
+  background-color: var(--titlebar-button-active-bg);
+}
+
+.titleBar_button svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* ================================================================
+   Close Button (special red hover)
+   ================================================================ */
+
+.titleBar_buttonClose:hover {
+  background-color: var(--titlebar-button-close-hover-bg);
+  color: var(--titlebar-button-close-hover-fg);
+}
+
+.titleBar_buttonClose:active {
+  background-color: var(--titlebar-button-close-active-bg);
+}
+
+/* ================================================================
+   Spacer (for when there's no icon, aligns title properly)
+   ================================================================ */
+
+.titleBar_spacer {
+  width: 4px;
+  flex-shrink: 0;
+}

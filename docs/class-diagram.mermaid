@@ -1,0 +1,185 @@
+classDiagram
+    direction TB
+
+    class PerformanceSnapshot {
+        +number timestamp
+        +number fps
+        +number frameTimeMs
+        +number eventLoopLagMs
+        +number memoryHeapMB
+        +boolean isLowFps
+        +number droppedFrames
+    }
+
+    class FpsConfig {
+        +number sampleWindowMs = 3000
+        +number reportIntervalMs = 1000
+        +number lowFpsThreshold = 24
+        +number lowFpsDurationMs = 5000
+    }
+
+    class EventLoopLagConfig {
+        +number sampleIntervalMs = 1000
+        +number lagThresholdMs = 50
+        +number reportIntervalMs = 5000
+    }
+
+    class PerformanceMonitor {
+        -FpsConfig _fpsConfig
+        -EventLoopLagConfig _eventLoopConfig
+        -PerformanceSnapshot _lastSnapshot
+        -number _eventLoopLagTimer
+        -boolean _isRunning
+        +start() void
+        +stop() void
+        +handleFpsSnapshot(snapshot) void
+        +getLastSnapshot() PerformanceSnapshot | null
+        +getEventLoopLag() number
+        +dispose() void
+        -_sampleEventLoopLag() void
+        -_checkThresholds() void
+    }
+
+    class IpcCompressConfig {
+        +boolean enabled = true
+        +number compressThresholdBytes = 65536
+        +number chunkThresholdBytes = 1048576
+        +number chunkSizeBytes = 524288
+        +number compressionLevel = 6
+    }
+
+    class IpcCompression {
+        -IpcCompressConfig _config
+        +compress(payload) CompressedResult
+        +decompress(data) Buffer
+        +shouldCompress(size) boolean
+        +shouldChunk(size) boolean
+        +createMiddleware() IpcCompressMiddleware
+    }
+
+    class CompressedResult {
+        +boolean compressed
+        +boolean chunked
+        +number originalSize
+        +number compressedSize
+        +Buffer[] chunks
+    }
+
+    class WindowState {
+        <<enumeration>>
+        NORMAL
+        MAXIMIZED
+        MINIMIZED
+        FULL_SCREEN
+        SNAPPED
+    }
+
+    class TitleBarProps {
+        +string title
+        +string iconSrc
+        +WindowState windowState
+        +boolean isFocused
+        +boolean isWin11
+        +ReactNode customSlot
+        +function onMinimize()
+        +function onMaximize()
+        +function onClose()
+        +function onDoubleClick()
+    }
+
+    class TitleBarButtonProps {
+        +ButtonType type
+        +boolean isMaximized
+        +boolean isWin11
+        +function onClick()
+    }
+
+    class ButtonType {
+        <<enumeration>>
+        MINIMIZE
+        MAXIMIZE
+        RESTORE
+        CLOSE
+    }
+
+    class ElectronAPI {
+        +WindowControlAPI windowControl
+        +PerformanceAPI performance
+    }
+
+    class WindowControlAPI {
+        +minimize() Promise~void~
+        +maximize() Promise~void~
+        +close() Promise~void~
+        +isMaximized() Promise~boolean~
+        +onWindowStateChange(callback) void
+        +showSystemMenu(x, y) Promise~void~
+    }
+
+    class PerformanceAPI {
+        +sendFpsSnapshot(snapshot) void
+        +getEventLoopLag() Promise~number~
+        +onLowFpsAlert(callback) void
+    }
+
+    class IpcCompressMiddleware {
+        +wrapHandler(channel, handler) function
+        +wrapInvoke(channel, args) Promise~any~
+    }
+
+    class StartupState {
+        <<enumeration>>
+        IDLE
+        LAUNCHER_STARTING
+        DAEMON_STARTING
+        DAEMON_READY
+        WINDOW_CREATING
+        WINDOW_READY
+        ROUTE_INIT
+        ROUTE_STABLE
+        DAEMON_FAILED
+        WINDOW_FAILED
+        PERFORMANCE_MONITORING
+    }
+
+    class ColdStartOptimizer {
+        -NsisConfig _nsisConfig
+        -LazyLoadConfig _lazyLoadConfig
+        -string _appPath
+        +warmupSQLite(dbPath) Promise~void~
+        +warmupSQLiteAsync(dbPath) Promise~void~
+        +addDefenderExclusion(appPath) Promise~void~
+        +configureLazyLoading() LazyLoadConfig
+    }
+
+    class WindowsLifecycle {
+        -WindowsLifecycleConfig _config
+        -StartupStateMachine _fsm
+        -PerformanceMonitor _perfMonitor
+        +setPerformanceMonitor(monitor) void
+        +dispose() void
+        -_registerHooks() void
+        -_onDaemonReady() void
+        -_onRouteStable() void
+    }
+
+    class Disposable {
+        <<interface>>
+        +dispose() void
+    }
+
+    PerformanceMonitor --> PerformanceSnapshot : produces
+    PerformanceMonitor --> FpsConfig : uses
+    PerformanceMonitor --> EventLoopLagConfig : uses
+    PerformanceMonitor ..|> Disposable
+    IpcCompression --> IpcCompressConfig : uses
+    IpcCompression --> CompressedResult : produces
+    IpcCompression --> IpcCompressMiddleware : creates
+    TitleBarProps --> WindowState : contains
+    TitleBarButtonProps --> ButtonType : contains
+    ElectronAPI --> WindowControlAPI : contains
+    ElectronAPI --> PerformanceAPI : contains
+    IpcCompressMiddleware --> IpcCompression : delegates to
+    WindowsLifecycle --> PerformanceMonitor : manages
+    WindowsLifecycle ..|> Disposable
+    ColdStartOptimizer ..|> Disposable
